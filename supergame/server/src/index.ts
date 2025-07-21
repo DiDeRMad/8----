@@ -20,7 +20,10 @@ const players: Record<string, Player> = {};
 interface Room {
   id: string;
   players: Record<string, Player>;
+  moves: Record<string, Move>;
 }
+
+type Move = 'rock' | 'paper' | 'scissors';
 
 const rooms: Record<string, Room> = {};
 const playerRoom: Record<string, string> = {}; // socket.id -> roomId
@@ -37,7 +40,7 @@ io.on('connection', (socket: Socket) => {
     const roomId = generateRoomId();
     const player: Player = { id: socket.id, nickname };
     players[socket.id] = player;
-    const room: Room = { id: roomId, players: { [socket.id]: player } };
+    const room: Room = { id: roomId, players: { [socket.id]: player }, moves: {} };
     rooms[roomId] = room;
     playerRoom[socket.id] = roomId;
     socket.join(roomId);
@@ -59,6 +62,19 @@ io.on('connection', (socket: Socket) => {
     socket.emit('room-joined', { roomId, players: Object.values(room.players) });
     socket.to(roomId).emit('player-joined-room', player);
     console.log(`${nickname} joined room ${roomId}`);
+    if (Object.keys(room.players).length > 2) {
+      // room full, revert and notify
+      delete room.players[socket.id];
+      delete players[socket.id];
+      delete playerRoom[socket.id];
+      socket.leave(roomId);
+      socket.emit('error', 'Room is full');
+      return;
+    }
+    // after successful join, check if ready to start
+    if (Object.keys(room.players).length === 2) {
+      io.to(roomId).emit('game-start');
+    }
   });
 
   socket.on('chat', (message: string) => {
@@ -68,6 +84,43 @@ io.on('connection', (socket: Socket) => {
     io.to(roomId).emit('chat', { player, message });
   });
 
+  socket.on('move', (move: Move) => {
+    const roomId = playerRoom[socket.id];
+    if (!roomId) return;
+    const room = rooms[roomId];
+    if (!room) return;
+    room.moves[socket.id] = move;
+    if (Object.keys(room.moves).length === Object.keys(room.players).length) {
+      // evaluate round
+      const playerIds = Object.keys(room.moves);
+      if (playerIds.length !== 2) {
+        // For now handle only 2-player comparison; reset moves
+        room.moves = {};
+        io.to(roomId).emit('round-result', { draw: true, info: 'Unsupported players count' });
+        return;
+      }
+      const [p1, p2] = playerIds;
+      const m1 = room.moves[p1];
+      const m2 = room.moves[p2];
+
+      let winnerId: string | null = null;
+      if (m1 === m2) {
+        winnerId = null; // Draw
+      } else if ((m1 === 'rock' && m2 === 'scissors') || (m1 === 'scissors' && m2 === 'paper') || (m1 === 'paper' && m2 === 'rock')) {
+        winnerId = p1;
+      } else {
+        winnerId = p2;
+      }
+
+      io.to(roomId).emit('round-result', {
+        moves: room.moves,
+        winnerId,
+      });
+      // reset moves for next round
+      room.moves = {};
+    }
+  });
+
   socket.on('disconnect', () => {
     const roomId = playerRoom[socket.id];
     if (roomId) {
@@ -75,6 +128,9 @@ io.on('connection', (socket: Socket) => {
       if (room) {
         delete room.players[socket.id];
         socket.to(roomId).emit('player-left-room', socket.id);
+        if (Object.keys(room.players).length < 2) {
+          io.to(roomId).emit('game-stop');
+        }
         if (Object.keys(room.players).length === 0) {
           delete rooms[roomId];
           console.log(`Room ${roomId} deleted (empty)`);

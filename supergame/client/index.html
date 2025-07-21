@@ -20,6 +20,12 @@
     <input id="chatMsg" placeholder="Type message" size="40" />
     <button id="sendChat">Send</button>
   </div>
+  <div id="game" style="display:none; margin-top:1rem;">
+    <p>Select your move:</p>
+    <button class="move" data-move="rock">🪨 Rock</button>
+    <button class="move" data-move="paper">📄 Paper</button>
+    <button class="move" data-move="scissors">✂️ Scissors</button>
+  </div>
 
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <script>
@@ -37,6 +43,9 @@
 
     const chatDiv = document.getElementById('chat');
     const chatMsgInput = document.getElementById('chatMsg');
+
+    const gameDiv = document.getElementById('game');
+    const moveButtons = Array.from(document.querySelectorAll('.move'));
 
     document.getElementById('createRoom').onclick = () => {
       const nickname = nicknameInput.value.trim();
@@ -79,6 +88,51 @@
 
     socket.on('chat', ({ player, message }) => {
       log(`${player.nickname}: ${message}`);
+    });
+
+    socket.on('error', msg => {
+      log(`Error: ${msg}`);
+    });
+
+    moveButtons.forEach(btn => {
+      btn.onclick = () => {
+        const move = btn.dataset.move;
+        socket.emit('move', move);
+        disableMoves();
+        log(`You chose ${move}`);
+      };
+    });
+
+    function enableMoves() {
+      moveButtons.forEach(b => b.disabled = false);
+    }
+    function disableMoves() {
+      moveButtons.forEach(b => b.disabled = true);
+    }
+
+    socket.on('game-start', () => {
+      log('Game started!');
+      gameDiv.style.display = 'block';
+      enableMoves();
+    });
+
+    socket.on('game-stop', () => {
+      log('Waiting for another player...');
+      disableMoves();
+      gameDiv.style.display = 'none';
+    });
+
+    socket.on('round-result', ({ moves, winnerId }) => {
+      const entries = Object.entries(moves).map(([id, mv]) => `${id === socket.id ? 'You' : id} chose ${mv}`);
+      log(entries.join(' | '));
+      if (winnerId === null) {
+        log('Round result: Draw');
+      } else if (winnerId === socket.id) {
+        log('Round result: You win!');
+      } else {
+        log('Round result: You lose.');
+      }
+      enableMoves();
     });
 
     function afterJoinRoom(players) {
