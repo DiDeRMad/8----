@@ -11,9 +11,15 @@
 <body>
   <h1>SuperGame Lobby</h1>
   <input id="nickname" placeholder="Enter nickname" />
-  <button id="join">Join</button>
+  <input id="roomId" placeholder="Room ID (optional)" />
+  <button id="createRoom">Create Room</button>
+  <button id="joinRoom">Join Room</button>
 
   <div id="log"></div>
+  <div id="chat" style="display:none; margin-top:1rem;">
+    <input id="chatMsg" placeholder="Type message" size="40" />
+    <button id="sendChat">Send</button>
+  </div>
 
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <script>
@@ -25,34 +31,62 @@
       logContainer.scrollTop = logContainer.scrollHeight;
     }
 
-    document.getElementById('join').onclick = () => {
-      const nicknameInput = document.getElementById('nickname');
+    const socket = io('http://localhost:3000');
+    const nicknameInput = document.getElementById('nickname');
+    const roomIdInput = document.getElementById('roomId');
+
+    const chatDiv = document.getElementById('chat');
+    const chatMsgInput = document.getElementById('chatMsg');
+
+    document.getElementById('createRoom').onclick = () => {
       const nickname = nicknameInput.value.trim();
-      if (!nickname) {
-        alert('Enter nickname');
-        return;
-      }
-
-      const socket = io('http://localhost:3000');
-      socket.emit('join', nickname);
-
-      socket.on('joined', player => {
-        log(`You joined as ${player.nickname} (${player.id})`);
-        nicknameInput.disabled = true;
-      });
-
-      socket.on('player-joined', player => {
-        log(`${player.nickname} joined the lobby`);
-      });
-
-      socket.on('player-left', id => {
-        log(`Player ${id} left`);
-      });
-
-      socket.on('disconnect', () => {
-        log('Disconnected from server');
-      });
+      if (!nickname) return alert('Enter nickname');
+      socket.emit('create-room', nickname);
     };
+
+    document.getElementById('joinRoom').onclick = () => {
+      const nickname = nicknameInput.value.trim();
+      const roomId = roomIdInput.value.trim().toUpperCase();
+      if (!nickname || !roomId) return alert('Enter nickname and room ID');
+      socket.emit('join-room', { roomId, nickname });
+    };
+
+    document.getElementById('sendChat').onclick = () => {
+      const msg = chatMsgInput.value.trim();
+      if (!msg) return;
+      socket.emit('chat', msg);
+      chatMsgInput.value = '';
+    };
+
+    socket.on('room-created', ({ roomId, players }) => {
+      log(`Room ${roomId} created. Waiting for players...`);
+      afterJoinRoom(players);
+      roomIdInput.value = roomId;
+    });
+
+    socket.on('room-joined', ({ roomId, players }) => {
+      log(`Joined room ${roomId}`);
+      afterJoinRoom(players);
+    });
+
+    socket.on('player-joined-room', player => {
+      log(`${player.nickname} joined room`);
+    });
+
+    socket.on('player-left-room', id => {
+      log(`Player ${id} left room`);
+    });
+
+    socket.on('chat', ({ player, message }) => {
+      log(`${player.nickname}: ${message}`);
+    });
+
+    function afterJoinRoom(players) {
+      nicknameInput.disabled = true;
+      roomIdInput.disabled = true;
+      chatDiv.style.display = 'block';
+      log('Players in room: ' + players.map(p => p.nickname).join(', '));
+    }
   </script>
 </body>
 </html>
